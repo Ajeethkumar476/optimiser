@@ -237,7 +237,8 @@
         let trialCorrectTargetsCount = 0; 
         let roundCorrectPocketsCount = 0; 
 
-        let confidenceHistory = []; 
+        // Tracks runtime confidence rating map per round
+        let confidenceSurveyCache = {}; 
         let accuracyHistory = [];   
 
         // Explicit Global DOM references
@@ -282,7 +283,7 @@
             headerElement.innerText = "Participant Verification";
 
             titleElement.innerText = "Welcome to the Experiment";
-            descElement.innerText = "Please input your Name and Email ID to load your personal session data state.";
+            descElement.innerText = "Please input your Name and Email ID to start the experiment.";
 
             let formWrapper = document.createElement('div');
             formWrapper.style.display = 'flex';
@@ -302,9 +303,9 @@
                     <div id="email-error" class="error-text">Please enter a valid email address.</div>
                 </div>
                 <button id="btn-submit-reg" class="btn-choice-card primary-gateway" style="margin-top: 15px; width: 100%; max-width: 320px;">
-                    <span>Verify Profile State</span>
+                    <span>Go to Experiment</span>
                 </button>
-                <div id="loading-indicator">Querying database cloud records... Please hold.</div>
+                <div id="loading-indicator">Verifying the user's current state...</div>
             `;
 
             modeSelectionBox.appendChild(formWrapper);
@@ -326,48 +327,41 @@
                     playerIdentity.name = nameInput;
                     playerIdentity.email = emailInput.toLowerCase();
                     loader.style.display = 'block';
-                    
-                    // Fetch profile status securely from your script
                     fetchProfileStatusFromServer();
                 }
             };
         }
 
         function fetchProfileStatusFromServer() {
-            if (GOOGLE_SHEET_SCRIPT_URL === "YOUR_SCRIPT_URL_HERE") {
-                // Mock execution layer fallback if spreadsheet is absent
-                console.warn("App script target missing. Continuing via fallback variables.");
-                trialsCompletedSuccessfully = false;
-                displayInitialModeGateway();
-                return;
-            }
-
-            fetch(GOOGLE_SHEET_SCRIPT_URL, {
-                method: 'POST',
-                redirect: 'follow',
-                body: JSON.stringify({ action: 'register', name: playerIdentity.name, email: playerIdentity.email })
-            })
-            .then(res => res.json())
-            .then(json => {
-                playerIdentity.rowId = json.rowId;
-                trialsCompletedSuccessfully = json.trialsCompleted;
-                currentRound = json.nextRound;
-                gameIsFullyCompletedForUser = json.gameComplete;
-                totalScore = json.accumulatedScore;
-                totalCirclesPocketedInExperiment = json.accumulatedCircles;
-                
-                if (gameIsFullyCompletedForUser) {
-                    displayGameFinishedScreen();
-                } else {
-                    displayInitialModeGateway();
-                }
-            })
-            .catch(err => {
-                console.error("Profile validation error:", err);
-                // Fail-safe default strategy behavior
-                displayInitialModeGateway();
-            });
-        }
+			fetch(GOOGLE_SHEET_SCRIPT_URL, {
+				method: 'POST',
+				redirect: 'follow',
+				body: JSON.stringify({ action: 'register', name: playerIdentity.name, email: playerIdentity.email })
+			})
+			.then(res => res.json())
+			.then(json => {
+				playerIdentity.rowId = json.rowId;
+				// Strictly evaluate boolean
+				trialsCompletedSuccessfully = (json.trialsCompleted === true || json.trialsCompleted === "true");
+				currentRound = json.nextRound || 1;
+				gameIsFullyCompletedForUser = (json.gameComplete === true || json.gameComplete === "true");
+				
+				// --- RESTORE ACCUMULATED TOTALS FROM SHEET ON RE-LOGIN ---
+				totalScore = parseInt(json.accumulatedScore) || 0;
+				totalCirclesPocketedInExperiment = parseInt(json.accumulatedCircles) || 0;
+				
+				if (gameIsFullyCompletedForUser) {
+					displayGameFinishedScreen();
+				} else {
+					displayInitialModeGateway();
+				}
+			})
+			.catch(err => {
+				console.error("Profile validation error:", err);
+				trialsCompletedSuccessfully = false; // Fallback to trial experiment for unverified logins
+				displayInitialModeGateway();
+			});
+		}
 
         function displayGameFinishedScreen() {
             arenaElement.innerHTML = '';
@@ -378,39 +372,52 @@
             descElement.innerText = `Hello ${playerIdentity.name}, You have successfully finished the entire experiment.\n\nThank you for participating!\n\nFinal Score: ${totalScore} points | Circles Pocketed: ${totalCirclesPocketedInExperiment}`;
         }
 
-        // Screen 2: Dynamic Gateway Router Screen (Conforms to image_0d6e65.png request)
         function displayInitialModeGateway() {
             arenaElement.innerHTML = '';
             overlayElement.style.display = 'flex';
             modeSelectionBox.innerHTML = '';
-            headerElement.innerText = "Welcome to the Optimal Reminder Task";
-            titleElement.innerText = "Select Session Pathway";
-            descElement.innerText = "Choose whether you want to play the training/eligibility trial sessions first or bypass them to start the experiment blocks directly.";
 
             if (!trialsCompletedSuccessfully) {
-                // Fresh session or mid-trial refresh: starts from Trial 1 by default
+                // --- TRIAL EXPERIMENT GATEWAY ---
                 isTrialMode = true;
                 currentTrialRound = 1;
                 
+                headerElement.innerText = "Trial Experiment Pipeline";
+                titleElement.innerText = "Trial Experiment";
+                descElement.innerText = "Welcome to the Trial Experiment. This session consists of 6 training rounds designed to help you practice circle dragging mechanics, sequence rules, and special target reminder strategies before starting the actual experiment.";
+
                 let trialBtn = document.createElement('button');
                 trialBtn.className = 'btn-choice-card primary-gateway';
                 trialBtn.innerHTML = `
-                    <span>Run Training Trials<br>(Recommended)</span>
-                    <small>The Trial experiment has 6 rounds which helps you to understand the basics and points system of the main experiment.</small>
+                    <span>Run Training Trials</span>
+                    <small>Click to start Stage 1 of the 6 trial training blocks.</small>
                 `;
-                trialBtn.onclick = () => startTrialRoundLifecycle();
+                trialBtn.onclick = () => {
+                    isTrialMode = true;
+                    startTrialRoundLifecycle();
+                };
                 modeSelectionBox.appendChild(trialBtn);
+
             } else {
-                // Post-Trial State or Mid-Experiment refresh: proceeds directly to the uncompleted main round index
+                // --- MAIN EXPERIMENT GATEWAY ---
                 isTrialMode = false;
                 
+                headerElement.innerText = "Main Experiment Pipeline";
+                titleElement.innerText = "Main Experiment";
+                descElement.innerText = `From now on, you will be allocated points for each correct response.
+You have to aim for getting maximum number of points in the upcoming trials.
+You will have 17 upcoming trials, you’ll be given instructions before the start of each trial. Read the instructions carefully and move further.`;
+
                 let directMainBtn = document.createElement('button');
                 directMainBtn.className = 'btn-choice-card primary-gateway';
                 directMainBtn.innerHTML = `
                     <span>Launch Main Experiment</span>
-                    <small>Training credentials confirmed. Click here to resume the Main Run starting from **Round ${currentRound} of 17**.</small>
+                    <small>Click here to start/resume Main Task Round ${currentRound} of 17.</small>
                 `;
-                directMainBtn.onclick = () => startNewRoundLifecycle();
+                directMainBtn.onclick = () => {
+                    isTrialMode = false;
+                    startNewRoundLifecycle();
+                };
                 modeSelectionBox.appendChild(directMainBtn);
             }
         }
@@ -451,200 +458,194 @@
 
         // ================= TRIAL TRACK LIFE-CYCLE EXECUTION CONTROLLERS =================
         function startTrialRoundLifecycle() {
-			arenaElement.innerHTML = '';
-			overlayElement.style.display = 'flex';
-			modeSelectionBox.innerHTML = '';
-			updateHeaderMetrics();
+            isTrialMode = true; // Strictly enforce trial mode state
+            arenaElement.innerHTML = '';
+            overlayElement.style.display = 'flex';
+            modeSelectionBox.innerHTML = '';
+            updateHeaderMetrics();
 
-			let runBtn = document.createElement('button');
-			runBtn.className = 'btn-choice-card';
-			runBtn.style.maxWidth = "100%";
-			runBtn.innerHTML = "<span>Start Trial Game</span>";
+            let runBtn = document.createElement('button');
+            runBtn.className = 'btn-choice-card';
+            runBtn.style.maxWidth = "100%";
+            runBtn.innerHTML = "<span>Start Trial Game</span>";
 
-			let displaySurveyBar = (currentTrialRound === 4 || currentTrialRound === 6);
-			let surveyMarkup = null;
-			if (displaySurveyBar) {
-				surveyMarkup = createConfidenceSliderMarkup();
-				overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
-				surveyMarkup.querySelector('.survey-label').innerHTML = `Confidence Level for Trial Stage ${currentTrialRound}: <span id="val-indicator">0</span>%`;
-			}
+            let displaySurveyBar = (currentTrialRound === 4 || currentTrialRound === 6);
+            let surveyMarkup = null;
+            if (displaySurveyBar) {
+                surveyMarkup = createConfidenceSliderMarkup();
+                overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
+                surveyMarkup.querySelector('.survey-label').innerHTML = `Confidence Level for Trial Stage ${currentTrialRound}: <span id="val-indicator">0</span>%`;
+            }
 
-			const handleTrialLaunch = (mode, points) => {
-				if (displaySurveyBar) {
-					if (!sliderHasBeenInteractedWith) {
-						let errorMsg = document.getElementById('survey-error-msg');
-						if (errorMsg) errorMsg.style.display = 'block';
-						return;
-					}
-					let sliderVal = document.getElementById('confidence-range-slider').value;
-					confidenceHistory.push({ round: `Trial-${currentTrialRound}`, mode: mode, value: parseInt(sliderVal) });
-					if (surveyMarkup) surveyMarkup.remove();
-				}
-				launchActiveMatchInstance(mode, points);
-			};
+            const handleTrialLaunch = (mode, points) => {
+                if (displaySurveyBar) {
+                    if (!sliderHasBeenInteractedWith) {
+                        let errorMsg = document.getElementById('survey-error-msg');
+                        if (errorMsg) errorMsg.style.display = 'block';
+                        return;
+                    }
+                    if (surveyMarkup) surveyMarkup.remove();
+                }
+                launchActiveMatchInstance(mode, points);
+            };
 
-			switch(currentTrialRound) {
-				case 1:
-					titleElement.innerText = "Trial Stage 1 \nIn this experiment you will have a simple task to do";
-					descElement.innerText = "You will see several yellow circles inside a box. Inside each circle will be a number.You can move them around using your mouse. Your task is to drag them to the bottom of the box in sequence. Please start by dragging 1 all the way to the bottom. This will make it disappear. Then drag 2 to the bottom, then 3, and so on.";
-					maxCircleLimit = 8;
-					runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
-					break;
-				case 2:
-					titleElement.innerText = "Trial Stage 2 \nNow with one special circle with 8 numbers";
-					descElement.innerText = "Now you will see 8 circles in the trail. You have to drag the circles to the bottom. \nAmong 8 circles there will be one special circle that will be a different color. \nThe colored circles has to be dragged to the side of square that matches with the special circle";
-					maxCircleLimit = 8;
-					runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
-					break;
-				case 3:
-					titleElement.innerText = "Trial Stage 3\nNow it will get more difficult.";
-					descElement.innerText = "There will be a total of 25 circles and 10 of them will be special ones that should go to one of the colored circles of the box. \nDon’t worry if you do not remember all of them. That’s fine- just try to remember as many as you can.";
-					maxCircleLimit = 25;
-					runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
-					break;
-				case 4:
-					titleElement.innerText = "Trial Stage 4 \nIn this trail, we are going to explain a strategy that can make the task easier";
-					descElement.innerText = "When you see a special circle, you can set a reminder by quickly dragging the special circle to the intended part of the box. \nExample: If the special circle appears in blue color you have to drag it to the blue (left) side of the box. Thus, this help you to correctly drag the special circle in the sequence its location would remind you where it is supposed to go. Try the upcoming task, using this strategy to help you.";
-					maxCircleLimit = 25;
-					runBtn.onclick = () => handleTrialLaunch('reminder', 10);
-					break;
-				case 5:
-					titleElement.innerText = "Trial Stage 5";
-					descElement.innerText = "Now there will be a total of 25 circles and 10 of them will be special circles that should go to intended coloured sides of the box. You should use the reminder in this trail.";
-					maxCircleLimit = 25;
-					runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
-					break;
-				case 6:
-					titleElement.innerText = "Trial Stage 6";
-					descElement.innerText = " Now this trail repeats the same procedure of task 5. There will be a total of 25 circles and 10 of them will be special circles that should go to intended coloured sides of the box. You should use the reminder in this trail.";
-					maxCircleLimit = 25;
-					runBtn.onclick = () => handleTrialLaunch('reminder', 10);
-					break;
-			}
+            switch(currentTrialRound) {
+                case 1:
+                    titleElement.innerText = "Trial Stage 1 \nIn this experiment you will have a simple task to do";
+                    descElement.innerText = "You will see several yellow circles inside a box. Inside each circle will be a number. You can move them around using your mouse. Your task is to drag them to the bottom of the box in sequence. Please start by dragging 1 all the way to the bottom. This will make it disappear. Then drag 2 to the bottom, then 3, and so on.";
+                    maxCircleLimit = 8;
+                    runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
+                    break;
+                case 2:
+                    titleElement.innerText = "Trial Stage 2 \nNow with one special circle with 8 numbers";
+                    descElement.innerText = "Now you will see 8 circles in the trial. You have to drag the circles to the bottom. \nAmong 8 circles there will be one special circle that will be a different color. \nThe colored circles have to be dragged to the side of the square that matches with the special circle.";
+                    maxCircleLimit = 8;
+                    runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
+                    break;
+                case 3:
+                    titleElement.innerText = "Trial Stage 3\nNow it will get more difficult.";
+                    descElement.innerText = "There will be a total of 25 circles and 10 of them will be special ones that should go to one of the colored sides of the box. \nDon’t worry if you do not remember all of them. That’s fine - just try to remember as many as you can.";
+                    maxCircleLimit = 25;
+                    runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
+                    break;
+                case 4:
+                    titleElement.innerText = "Trial Stage 4 \nIn this trial, we are going to explain a strategy that can make the task easier";
+                    descElement.innerText = "When you see a special circle, you can set a reminder by quickly dragging the special circle to the intended part of the box. \nExample: If the special circle appears in blue color you have to drag it to the blue (left) side of the box. Thus, this helps you to correctly drag the special circle in the sequence its location would remind you where it is supposed to go. Try the upcoming task, using this strategy to help you.";
+                    maxCircleLimit = 25;
+                    runBtn.onclick = () => handleTrialLaunch('reminder', 10);
+                    break;
+                case 5:
+                    titleElement.innerText = "Trial Stage 5";
+                    descElement.innerText = "Now there will be a total of 25 circles and 10 of them will be special circles that should go to intended colored sides of the box. You should use the reminder in this trial.";
+                    maxCircleLimit = 25;
+                    runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
+                    break;
+                case 6:
+                    titleElement.innerText = "Trial Stage 6";
+                    descElement.innerText = "Now this trial repeats the same procedure of task 5. There will be a total of 25 circles and 10 of them will be special circles that should go to intended colored sides of the box. You should use the reminder in this trial.";
+                    maxCircleLimit = 25;
+                    runBtn.onclick = () => handleTrialLaunch('reminder', 10);
+                    break;
+            }
 
-			modeSelectionBox.appendChild(runBtn);
-		}
+            modeSelectionBox.appendChild(runBtn);
+        }
 
         // ================= EXPERIMENT LIFE-CYCLE CONTROLLERS =================
         function startNewRoundLifecycle() {
+            isTrialMode = false; // Strictly enforce main experiment mode state
             presentModeSelectionOverlay();
         }
 
         function presentModeSelectionOverlay() {
-			arenaElement.innerHTML = '';
-			overlayElement.style.display = 'flex';
-			modeSelectionBox.innerHTML = '';
-			updateHeaderMetrics();
+            arenaElement.innerHTML = '';
+            overlayElement.style.display = 'flex';
+            modeSelectionBox.innerHTML = '';
+            updateHeaderMetrics();
 
-			if (currentRound > 17) {
+            if (currentRound > 17) {
                 gameIsFullyCompletedForUser = true;
                 displayGameFinishedScreen();
-				return;
-			}
+                return;
+            }
 
-			titleElement.innerText = `Main Task Run: Round ${currentRound}`;
-			
-			let displaySurveyBar = (currentRound === 1 || currentRound % 2 === 0);
-			let surveyMarkup = null;
+            titleElement.innerText = `Experiment Round ${currentRound}`;
+            
+            let displaySurveyBar = (currentRound === 1 || currentRound % 2 === 0);
+            let surveyMarkup = null;
 
-			if (displaySurveyBar) {
-				surveyMarkup = createConfidenceSliderMarkup();
-				overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
-			}
+            if (displaySurveyBar) {
+                surveyMarkup = createConfidenceSliderMarkup();
+                overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
+            }
 
-			if (currentRound % 2 !== 0) {
-				let oddIndex = Math.floor(currentRound / 2);
-				let assignedReminderPoints = oddRunPointsPool[oddIndex];
+            if (currentRound % 2 !== 0) {
+                let oddIndex = Math.floor(currentRound / 2);
+                let assignedReminderPoints = oddRunPointsPool[oddIndex];
 
-				descElement.innerText = `From now on, you will be allocated points for each correct response.
-                                        You have to aim for getting maximum number of points in the upcoming trails.
-                                        You will have 17 upcoming trails, you’ll be given instructions before the start of each trial. Read the instructions carefully and move further.
-                                        In certain trails the instruction will say, “This time you will be allowed to set reminders.” When this happens you must reminders for the special circles.
-                                        And other times, “This time you are not allowed to set reminders”. When this happens you cannot set reminders for the special circles. 
-                                        In certain trails, you will not be given choices and instructed to do it either with or without reminders. 
-                                        For few trails, you will be given choice to choose between two options. You should choose whichever option you think will score you the most points.`;
+                descElement.innerText = `Choose any one of the experiment type you want to proceed in this round.`;
 
-				let reminderBtn = document.createElement('button');
-				reminderBtn.className = 'btn-choice-card';
-				reminderBtn.innerHTML = `
-					<span>Game Style: Reminders Allowed</span>
-					<small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +${assignedReminderPoints} Points</small>
-				`;
-				reminderBtn.onclick = () => {
-					if (displaySurveyBar) {
-						if (!sliderHasBeenInteractedWith) {
-							let errorMsg = document.getElementById('survey-error-msg');
-							if (errorMsg) errorMsg.style.display = 'block';
-							return;
-						}
-						let sliderVal = document.getElementById('confidence-range-slider').value;
-						confidenceHistory.push({ round: currentRound, mode: 'reminder', value: parseInt(sliderVal) });
-						if (surveyMarkup) surveyMarkup.remove();
-					}
-					maxCircleLimit = 25; 
-					launchActiveMatchInstance('reminder', assignedReminderPoints);
-				};
-				modeSelectionBox.appendChild(reminderBtn);
+                let reminderBtn = document.createElement('button');
+                reminderBtn.className = 'btn-choice-card';
+                reminderBtn.innerHTML = `
+                    <span>Reminders Allowed</span>
+                    <small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +${assignedReminderPoints} Points</small>
+                `;
+                reminderBtn.onclick = () => {
+                    if (displaySurveyBar) {
+                        if (!sliderHasBeenInteractedWith) {
+                            let errorMsg = document.getElementById('survey-error-msg');
+                            if (errorMsg) errorMsg.style.display = 'block';
+                            return;
+                        }
+                        let sliderVal = document.getElementById('confidence-range-slider').value;
+                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
+                        if (surveyMarkup) surveyMarkup.remove();
+                    }
+                    maxCircleLimit = 25; 
+                    launchActiveMatchInstance('reminder', assignedReminderPoints);
+                };
+                modeSelectionBox.appendChild(reminderBtn);
 
-				let sequentialBtn = document.createElement('button');
-				sequentialBtn.className = 'btn-choice-card';
-				sequentialBtn.innerHTML = `
-					<span>Game Style: Reminders not allowed</span>
-					<small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
-				`;
-				sequentialBtn.onclick = () => {
-					if (displaySurveyBar) {
-						if (!sliderHasBeenInteractedWith) {
-							let errorMsg = document.getElementById('survey-error-msg');
-							if (errorMsg) errorMsg.style.display = 'block';
-							return;
-						}
-						let sliderVal = document.getElementById('confidence-range-slider').value;
-						confidenceHistory.push({ round: currentRound, mode: 'no-reminder', value: parseInt(sliderVal) });
-						if (surveyMarkup) surveyMarkup.remove();
-					}
-					maxCircleLimit = 25; 
-					launchActiveMatchInstance('no-reminder', 10);
-				};
-				modeSelectionBox.appendChild(sequentialBtn);
+                let sequentialBtn = document.createElement('button');
+                sequentialBtn.className = 'btn-choice-card';
+                sequentialBtn.innerHTML = `
+                    <span>Reminders not allowed</span>
+                    <small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
+                `;
+                sequentialBtn.onclick = () => {
+                    if (displaySurveyBar) {
+                        if (!sliderHasBeenInteractedWith) {
+                            let errorMsg = document.getElementById('survey-error-msg');
+                            if (errorMsg) errorMsg.style.display = 'block';
+                            return;
+                        }
+                        let sliderVal = document.getElementById('confidence-range-slider').value;
+                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
+                        if (surveyMarkup) surveyMarkup.remove();
+                    }
+                    maxCircleLimit = 25; 
+                    launchActiveMatchInstance('no-reminder', 10);
+                };
+                modeSelectionBox.appendChild(sequentialBtn);
 
-			} else {
-				let assignedType = evenRunsConfig[currentRound];
-				descElement.innerText = "This is an even-numbered round. Your game configuration has been pre-assigned dynamically.";
+            } else {
+                let assignedType = evenRunsConfig[currentRound];
+                descElement.innerText = "This round configuration has been pre-assigned dynamically. Set your confidence level and proceed with the round";
 
-				let launchForcedBtn = document.createElement('button');
-				launchForcedBtn.className = 'btn-choice-card';
-				launchForcedBtn.style.maxWidth = "100%";
+                let launchForcedBtn = document.createElement('button');
+                launchForcedBtn.className = 'btn-choice-card';
+                launchForcedBtn.style.maxWidth = "100%";
 
-				if (assignedType === 'reminder') {
-					launchForcedBtn.innerHTML = `
-						<span>Play Assigned Stage: Reminders Allowed</span>
-						<small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +10 Points</small>
-						`;
-				} else {
-					launchForcedBtn.innerHTML = `
-						<span>Play Assigned Stage: Reminders not allowed</span>
-						<small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
-					`;
-				}
+                if (assignedType === 'reminder') {
+                    launchForcedBtn.innerHTML = `
+                        <span>Reminders Allowed</span>
+                        <small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +10 Points</small>
+                        `;
+                } else {
+                    launchForcedBtn.innerHTML = `
+                        <span>Reminders not allowed</span>
+                        <small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
+                    `;
+                }
 
-				launchForcedBtn.onclick = () => {
-					if (displaySurveyBar) {
-						if (!sliderHasBeenInteractedWith) {
-							let errorMsg = document.getElementById('survey-error-msg');
-							if (errorMsg) errorMsg.style.display = 'block';
-							return;
-						}
-						let sliderVal = document.getElementById('confidence-range-slider').value;
-						confidenceHistory.push({ round: currentRound, mode: assignedType, value: parseInt(sliderVal) });
-						if (surveyMarkup) surveyMarkup.remove();
-					}
-					maxCircleLimit = 25; 
-					launchActiveMatchInstance(assignedType, 10);
-				};
-				modeSelectionBox.appendChild(launchForcedBtn);
-			}
-		}
+                launchForcedBtn.onclick = () => {
+                    if (displaySurveyBar) {
+                        if (!sliderHasBeenInteractedWith) {
+                            let errorMsg = document.getElementById('survey-error-msg');
+                            if (errorMsg) errorMsg.style.display = 'block';
+                            return;
+                        }
+                        let sliderVal = document.getElementById('confidence-range-slider').value;
+                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
+                        if (surveyMarkup) surveyMarkup.remove();
+                    }
+                    maxCircleLimit = 25; 
+                    launchActiveMatchInstance(assignedType, 10);
+                };
+                modeSelectionBox.appendChild(launchForcedBtn);
+            }
+        }
 
         function getUnstagedSpecialOnBoard() {
             if (currentSubGame !== 'reminder') return null;
@@ -894,15 +895,15 @@
             let expectedCorrectZone = activeTargetMetric ? targetCirclesData[num].targetSide : 'bottom';
             let isCorrect = (finishedZone === expectedCorrectZone);
 
+            let calculatedPointsForCircle = 0;
             if (activeTargetMetric && isCorrect) {
                 roundCorrectPocketsCount++;
+                calculatedPointsForCircle = activeMatchPointsWeight;
                 if (!isTrialMode) totalCirclesPocketedInExperiment++;
             }
 
             if (!isTrialMode) {
-                if (activeTargetMetric && isCorrect) {
-                    totalScore += activeMatchPointsWeight; 
-                }
+                totalScore += calculatedPointsForCircle; 
             } else {
                 if (activeTargetMetric && isCorrect) {
                     trialCorrectTargetsCount++;
@@ -982,9 +983,8 @@
                     startTrialRoundLifecycle();
                 };
             } else {
-                // Instantly flips the database-backed visibility settings
                 trialsCompletedSuccessfully = true;
-                progressBtn.innerHTML = "<span>Return to Home Gateway</span>";
+                progressBtn.innerHTML = "<span>Procedd to Main Experiment</span>";
                 progressBtn.onclick = () => {
                     displayInitialModeGateway();
                 };
@@ -993,46 +993,63 @@
         }
 
         function evaluateMainMatchCompletion() {
-            accuracyHistory.push({ round: currentRound, mode: currentSubGame, score: roundCorrectPocketsCount });
+			let totalSpecialCirclesInRound = 10;
+			
+			// Calculate points and circles earned specifically in this round
+			let roundScoreCalculated = roundCorrectPocketsCount * activeMatchPointsWeight;
+			let maxPossibleRoundScore = totalSpecialCirclesInRound * activeMatchPointsWeight;
 
-            // Send full aggregate mid-game counts on each round completion
-            syncDataToSheets({
-                action: 'syncRound',
-                rowId: playerIdentity.rowId,
-                round: currentRound,
-                score: roundCorrectPocketsCount,
-                totalCircles: totalCirclesPocketedInExperiment,
-                totalScore: totalScore
-            });
+			// Increment running experiment totals
+			totalScore += roundScoreCalculated;
+			totalCirclesPocketedInExperiment += roundCorrectPocketsCount;
 
-            currentSubGame = ''; 
-            arenaElement.innerHTML = '';
-            overlayElement.style.display = 'flex';
-            modeSelectionBox.innerHTML = '';
-            
-            titleElement.innerText = `Round ${currentRound} Complete`;
-            descElement.innerText = `You have completed this round.\n\nCurrent Total Accumulated Score: ${totalScore} points.`;
-            
-            let nextRoundBtn = document.createElement('button');
-            nextRoundBtn.className = 'btn-choice-card';
-            nextRoundBtn.style.maxWidth = "100%";
-            nextRoundBtn.innerHTML = "<span>Proceed Next</span>";
-            nextRoundBtn.onclick = () => {
-                currentRound++;
-                startNewRoundLifecycle();
-            };
-            modeSelectionBox.appendChild(nextRoundBtn);
-        }
+			accuracyHistory.push({ round: currentRound, mode: currentSubGame, score: roundCorrectPocketsCount });
 
-        // Global Sheets Sync Pipeline Implementation
+			// Sync updated round performance and accumulators to Google Sheets
+			syncDataToSheets({
+				action: 'syncRound',
+				rowId: playerIdentity.rowId,
+				round: currentRound,
+				circlesPocketed: roundCorrectPocketsCount,
+				roundScoreEarned: roundScoreCalculated,
+				confidenceMetric: confidenceSurveyCache[currentRound] !== undefined ? confidenceSurveyCache[currentRound] : "Not Available",
+				totalCircles: totalCirclesPocketedInExperiment,
+				totalScore: totalScore
+			});
+
+			currentSubGame = ''; 
+			arenaElement.innerHTML = '';
+			overlayElement.style.display = 'flex';
+			modeSelectionBox.innerHTML = '';
+			
+			titleElement.innerText = `Round ${currentRound} Complete`;
+			
+			// Display per-round metrics and running accumulators
+			descElement.innerText = 
+				`You have completed Round ${currentRound}!\n\n` +
+				`Correctly Pocketed Circles: ${roundCorrectPocketsCount} / ${totalSpecialCirclesInRound}\n` +
+				`Scores Gained This Round: ${roundScoreCalculated} / ${maxPossibleRoundScore} points\n\n` +
+				`Total Accumulated Game Score: ${totalScore} points`;
+			
+			let nextRoundBtn = document.createElement('button');
+			nextRoundBtn.className = 'btn-choice-card';
+			nextRoundBtn.style.maxWidth = "100%";
+			nextRoundBtn.innerHTML = "<span>Proceed</span>";
+			nextRoundBtn.onclick = () => {
+				currentRound++;
+				startNewRoundLifecycle();
+			};
+			modeSelectionBox.appendChild(nextRoundBtn);
+		}
+		
         function syncDataToSheets(payload) {
-            if (GOOGLE_SHEET_SCRIPT_URL === "YOUR_SCRIPT_URL_HERE") return;
-
             fetch(GOOGLE_SHEET_SCRIPT_URL, {
                 method: 'POST',
                 redirect: 'follow',
                 body: JSON.stringify(payload)
             })
+            .then(res => res.json())
+            .then(data => console.log("Round sync response:", data))
             .catch(err => console.error("Sheets transmission network drop:", err));
         }
     </script>
