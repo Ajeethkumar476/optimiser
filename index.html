@@ -45,9 +45,11 @@
             margin-top: 25px;
             flex-wrap: wrap;
             justify-content: center;
+            align-items: center;
+            flex-direction: row;
         }
         .btn-choice-card {
-            padding: 20px 30px;
+            padding: 20px 20px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
@@ -56,6 +58,7 @@
             background-color: #f9f9f9;
             transition: background-color 0.2s, transform 0.1s;
             max-width: 320px;
+            width: 100%;
             display: flex;
             flex-direction: column;
             gap: 8px;
@@ -116,7 +119,7 @@
 
         /* Confidence Survey Container Layout */
         .survey-wrapper {
-            margin: 20px auto;
+            margin: 10px auto;
             padding: 15px 25px;
             border: 2px dashed #ccc;
             border-radius: 8px;
@@ -166,7 +169,7 @@
             overflow: hidden; 
         }
 
-        /* Target Circles: Enlarged 1.5x (Width/Height set precisely to 18%) */
+        /* Target Circles: Width/Height set precisely to 18% */
         .circle {
             position: absolute;
             width: 18%;
@@ -305,7 +308,7 @@
                 <button id="btn-submit-reg" class="btn-choice-card primary-gateway" style="margin-top: 15px; width: 100%; max-width: 320px;">
                     <span>Go to Experiment</span>
                 </button>
-                <div id="loading-indicator">Verifying the user's current state...</div>
+                <div id="loading-indicator">Loading the experiment...</div>
             `;
 
             modeSelectionBox.appendChild(formWrapper);
@@ -333,35 +336,34 @@
         }
 
         function fetchProfileStatusFromServer() {
-			fetch(GOOGLE_SHEET_SCRIPT_URL, {
-				method: 'POST',
-				redirect: 'follow',
-				body: JSON.stringify({ action: 'register', name: playerIdentity.name, email: playerIdentity.email })
-			})
-			.then(res => res.json())
-			.then(json => {
-				playerIdentity.rowId = json.rowId;
-				// Strictly evaluate boolean
-				trialsCompletedSuccessfully = (json.trialsCompleted === true || json.trialsCompleted === "true");
-				currentRound = json.nextRound || 1;
-				gameIsFullyCompletedForUser = (json.gameComplete === true || json.gameComplete === "true");
-				
-				// --- RESTORE ACCUMULATED TOTALS FROM SHEET ON RE-LOGIN ---
-				totalScore = parseInt(json.accumulatedScore) || 0;
-				totalCirclesPocketedInExperiment = parseInt(json.accumulatedCircles) || 0;
-				
-				if (gameIsFullyCompletedForUser) {
-					displayGameFinishedScreen();
-				} else {
-					displayInitialModeGateway();
-				}
-			})
-			.catch(err => {
-				console.error("Profile validation error:", err);
-				trialsCompletedSuccessfully = false; // Fallback to trial experiment for unverified logins
-				displayInitialModeGateway();
-			});
-		}
+            fetch(GOOGLE_SHEET_SCRIPT_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                body: JSON.stringify({ action: 'register', name: playerIdentity.name, email: playerIdentity.email })
+            })
+            .then(res => res.json())
+            .then(json => {
+                playerIdentity.rowId = json.rowId;
+                trialsCompletedSuccessfully = (json.trialsCompleted === true || json.trialsCompleted === "true");
+                currentRound = json.nextRound || 1;
+                gameIsFullyCompletedForUser = (json.gameComplete === true || json.gameComplete === "true");
+                
+                // Restore saved aggregate counts on refresh/login
+                totalScore = parseInt(json.accumulatedScore) || 0;
+                totalCirclesPocketedInExperiment = parseInt(json.accumulatedCircles) || 0;
+                
+                if (gameIsFullyCompletedForUser) {
+                    displayGameFinishedScreen();
+                } else {
+                    displayInitialModeGateway();
+                }
+            })
+            .catch(err => {
+                console.error("Profile validation error:", err);
+                trialsCompletedSuccessfully = false;
+                displayInitialModeGateway();
+            });
+        }
 
         function displayGameFinishedScreen() {
             arenaElement.innerHTML = '';
@@ -378,7 +380,6 @@
             modeSelectionBox.innerHTML = '';
 
             if (!trialsCompletedSuccessfully) {
-                // --- TRIAL EXPERIMENT GATEWAY ---
                 isTrialMode = true;
                 currentTrialRound = 1;
                 
@@ -399,20 +400,19 @@
                 modeSelectionBox.appendChild(trialBtn);
 
             } else {
-                // --- MAIN EXPERIMENT GATEWAY ---
                 isTrialMode = false;
                 
                 headerElement.innerText = "Main Experiment Pipeline";
                 titleElement.innerText = "Main Experiment";
-                descElement.innerText = `From now on, you will be allocated points for each correct response.
-You have to aim for getting maximum number of points in the upcoming trials.
-You will have 17 upcoming trials, you’ll be given instructions before the start of each trial. Read the instructions carefully and move further.`;
+                descElement.innerText = `You will be allocated points for each correct response.
+You have to aim for getting maximum number of points in the upcoming rounds.
+You will have 17 upcoming rounds, you’ll be given instructions before the start of each round. Read the instructions carefully and move further.`;
 
                 let directMainBtn = document.createElement('button');
                 directMainBtn.className = 'btn-choice-card primary-gateway';
                 directMainBtn.innerHTML = `
                     <span>Launch Main Experiment</span>
-                    <small>Click here to start/resume Main Task Round ${currentRound} of 17.</small>
+                    <small>Click here to start Round ${currentRound} of 17</small>
                 `;
                 directMainBtn.onclick = () => {
                     isTrialMode = false;
@@ -430,7 +430,7 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
             let container = document.createElement('div');
             container.className = 'survey-wrapper';
             container.innerHTML = `
-                <label class="survey-label">Confidence Level for Round ${currentRound}: <span id="val-indicator">0</span>%</label>
+                <label class="survey-label">Confidence Level: <span id="val-indicator">0</span>%</label>
                 <input type="range" min="0" max="100" step="5" value="0" class="slider-control" id="confidence-range-slider">
                 <div class="slider-markers">
                     <span>0% (Not Sure)</span>
@@ -456,9 +456,49 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
             return container;
         }
 
+        // ================= CONFIDENCE PROMPT STEP CONTROLLER =================
+        function promptConfidenceSurvey(stageTitle, callback) {
+            arenaElement.innerHTML = '';
+            overlayElement.style.display = 'flex';
+            modeSelectionBox.innerHTML = '';
+
+            titleElement.innerText = `${stageTitle} — Confidence Assessment`;
+            descElement.innerText = `Before starting this round, please rate your confidence level on the slider below.`;
+
+            let surveyWrapper = createConfidenceSliderMarkup();
+            let surveyLabel = surveyWrapper.querySelector('.survey-label');
+            if (surveyLabel) {
+                surveyLabel.innerHTML = `Confidence Level for ${stageTitle}: <span id="val-indicator">0</span>%`;
+            }
+            
+            modeSelectionBox.appendChild(surveyWrapper);
+
+            let proceedBtn = document.createElement('button');
+            proceedBtn.className = 'btn-choice-card primary-gateway';
+            proceedBtn.style.maxWidth = "320px";
+            proceedBtn.style.marginTop = "15px";
+            proceedBtn.innerHTML = "<span>Proceed</span>";
+
+            proceedBtn.onclick = () => {
+                if (!sliderHasBeenInteractedWith) {
+                    let errorMsg = document.getElementById('survey-error-msg');
+                    if (errorMsg) errorMsg.style.display = 'block';
+                    return;
+                }
+                let sliderVal = document.getElementById('confidence-range-slider').value;
+                if (!isTrialMode) {
+                    confidenceSurveyCache[currentRound] = parseInt(sliderVal);
+                }
+                modeSelectionBox.innerHTML = '';
+                callback();
+            };
+
+            modeSelectionBox.appendChild(proceedBtn);
+        }
+
         // ================= TRIAL TRACK LIFE-CYCLE EXECUTION CONTROLLERS =================
         function startTrialRoundLifecycle() {
-            isTrialMode = true; // Strictly enforce trial mode state
+            isTrialMode = true;
             arenaElement.innerHTML = '';
             overlayElement.style.display = 'flex';
             modeSelectionBox.innerHTML = '';
@@ -467,64 +507,49 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
             let runBtn = document.createElement('button');
             runBtn.className = 'btn-choice-card';
             runBtn.style.maxWidth = "100%";
-            runBtn.innerHTML = "<span>Start Trial Game</span>";
-
-            let displaySurveyBar = (currentTrialRound === 4 || currentTrialRound === 6);
-            let surveyMarkup = null;
-            if (displaySurveyBar) {
-                surveyMarkup = createConfidenceSliderMarkup();
-                overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
-                surveyMarkup.querySelector('.survey-label').innerHTML = `Confidence Level for Trial Stage ${currentTrialRound}: <span id="val-indicator">0</span>%`;
-            }
-
-            const handleTrialLaunch = (mode, points) => {
-                if (displaySurveyBar) {
-                    if (!sliderHasBeenInteractedWith) {
-                        let errorMsg = document.getElementById('survey-error-msg');
-                        if (errorMsg) errorMsg.style.display = 'block';
-                        return;
-                    }
-                    if (surveyMarkup) surveyMarkup.remove();
-                }
-                launchActiveMatchInstance(mode, points);
-            };
 
             switch(currentTrialRound) {
                 case 1:
                     titleElement.innerText = "Trial Stage 1 \nIn this experiment you will have a simple task to do";
                     descElement.innerText = "You will see several yellow circles inside a box. Inside each circle will be a number. You can move them around using your mouse. Your task is to drag them to the bottom of the box in sequence. Please start by dragging 1 all the way to the bottom. This will make it disappear. Then drag 2 to the bottom, then 3, and so on.";
                     maxCircleLimit = 8;
+                    runBtn.innerHTML = "<span>Start Trial Game</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
                     break;
                 case 2:
                     titleElement.innerText = "Trial Stage 2 \nNow with one special circle with 8 numbers";
                     descElement.innerText = "Now you will see 8 circles in the trial. You have to drag the circles to the bottom. \nAmong 8 circles there will be one special circle that will be a different color. \nThe colored circles have to be dragged to the side of the square that matches with the special circle.";
                     maxCircleLimit = 8;
+                    runBtn.innerHTML = "<span>Start Trial Game</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
                     break;
                 case 3:
                     titleElement.innerText = "Trial Stage 3\nNow it will get more difficult.";
                     descElement.innerText = "There will be a total of 25 circles and 10 of them will be special ones that should go to one of the colored sides of the box. \nDon’t worry if you do not remember all of them. That’s fine - just try to remember as many as you can.";
                     maxCircleLimit = 25;
+                    runBtn.innerHTML = "<span>Start Trial Game</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
                     break;
                 case 4:
                     titleElement.innerText = "Trial Stage 4 \nIn this trial, we are going to explain a strategy that can make the task easier";
                     descElement.innerText = "When you see a special circle, you can set a reminder by quickly dragging the special circle to the intended part of the box. \nExample: If the special circle appears in blue color you have to drag it to the blue (left) side of the box. Thus, this helps you to correctly drag the special circle in the sequence its location would remind you where it is supposed to go. Try the upcoming task, using this strategy to help you.";
                     maxCircleLimit = 25;
-                    runBtn.onclick = () => handleTrialLaunch('reminder', 10);
+                    runBtn.innerHTML = "<span>Select Strategy & Proceed</span>";
+                    runBtn.onclick = () => promptConfidenceSurvey('Trial Stage 4', () => launchActiveMatchInstance('reminder', 10));
                     break;
                 case 5:
                     titleElement.innerText = "Trial Stage 5";
                     descElement.innerText = "Now there will be a total of 25 circles and 10 of them will be special circles that should go to intended colored sides of the box. You should use the reminder in this trial.";
                     maxCircleLimit = 25;
+                    runBtn.innerHTML = "<span>Start Trial Game</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
                     break;
                 case 6:
                     titleElement.innerText = "Trial Stage 6";
                     descElement.innerText = "Now this trial repeats the same procedure of task 5. There will be a total of 25 circles and 10 of them will be special circles that should go to intended colored sides of the box. You should use the reminder in this trial.";
                     maxCircleLimit = 25;
-                    runBtn.onclick = () => handleTrialLaunch('reminder', 10);
+                    runBtn.innerHTML = "<span>Select Strategy & Proceed</span>";
+                    runBtn.onclick = () => promptConfidenceSurvey('Trial Stage 6', () => launchActiveMatchInstance('reminder', 10));
                     break;
             }
 
@@ -533,7 +558,7 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
 
         // ================= EXPERIMENT LIFE-CYCLE CONTROLLERS =================
         function startNewRoundLifecycle() {
-            isTrialMode = false; // Strictly enforce main experiment mode state
+            isTrialMode = false;
             presentModeSelectionOverlay();
         }
 
@@ -549,69 +574,49 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
                 return;
             }
 
-            titleElement.innerText = `Experiment Round ${currentRound}`;
-            
-            let displaySurveyBar = (currentRound === 1 || currentRound % 2 === 0);
-            let surveyMarkup = null;
-
-            if (displaySurveyBar) {
-                surveyMarkup = createConfidenceSliderMarkup();
-                overlayElement.insertBefore(surveyMarkup, modeSelectionBox);
-            }
+            titleElement.innerText = `Round ${currentRound}`;
 
             if (currentRound % 2 !== 0) {
                 let oddIndex = Math.floor(currentRound / 2);
                 let assignedReminderPoints = oddRunPointsPool[oddIndex];
 
-                descElement.innerText = `Choose any one of the experiment type you want to proceed in this round.`;
+                descElement.innerText = `Select your preferred type for this round`;
 
                 let reminderBtn = document.createElement('button');
                 reminderBtn.className = 'btn-choice-card';
                 reminderBtn.innerHTML = `
-                    <span>Reminders Allowed</span>
+                    <span>Game Style: Reminders Allowed</span>
                     <small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +${assignedReminderPoints} Points</small>
                 `;
                 reminderBtn.onclick = () => {
-                    if (displaySurveyBar) {
-                        if (!sliderHasBeenInteractedWith) {
-                            let errorMsg = document.getElementById('survey-error-msg');
-                            if (errorMsg) errorMsg.style.display = 'block';
-                            return;
-                        }
-                        let sliderVal = document.getElementById('confidence-range-slider').value;
-                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
-                        if (surveyMarkup) surveyMarkup.remove();
+                    maxCircleLimit = 25;
+                    if (currentRound === 1) {
+                        promptConfidenceSurvey('Round 1', () => launchActiveMatchInstance('reminder', assignedReminderPoints));
+                    } else {
+                        launchActiveMatchInstance('reminder', assignedReminderPoints);
                     }
-                    maxCircleLimit = 25; 
-                    launchActiveMatchInstance('reminder', assignedReminderPoints);
                 };
                 modeSelectionBox.appendChild(reminderBtn);
 
                 let sequentialBtn = document.createElement('button');
                 sequentialBtn.className = 'btn-choice-card';
                 sequentialBtn.innerHTML = `
-                    <span>Reminders not allowed</span>
+                    <span>Game Style: Reminders not allowed</span>
                     <small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
                 `;
                 sequentialBtn.onclick = () => {
-                    if (displaySurveyBar) {
-                        if (!sliderHasBeenInteractedWith) {
-                            let errorMsg = document.getElementById('survey-error-msg');
-                            if (errorMsg) errorMsg.style.display = 'block';
-                            return;
-                        }
-                        let sliderVal = document.getElementById('confidence-range-slider').value;
-                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
-                        if (surveyMarkup) surveyMarkup.remove();
+                    maxCircleLimit = 25;
+                    if (currentRound === 1) {
+                        promptConfidenceSurvey('Round 1', () => launchActiveMatchInstance('no-reminder', 10));
+                    } else {
+                        launchActiveMatchInstance('no-reminder', 10);
                     }
-                    maxCircleLimit = 25; 
-                    launchActiveMatchInstance('no-reminder', 10);
                 };
                 modeSelectionBox.appendChild(sequentialBtn);
 
             } else {
                 let assignedType = evenRunsConfig[currentRound];
-                descElement.innerText = "This round configuration has been pre-assigned dynamically. Set your confidence level and proceed with the round";
+                descElement.innerText = "The type of this round has been pre-assigned dynamically.";
 
                 let launchForcedBtn = document.createElement('button');
                 launchForcedBtn.className = 'btn-choice-card';
@@ -619,29 +624,19 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
 
                 if (assignedType === 'reminder') {
                     launchForcedBtn.innerHTML = `
-                        <span>Reminders Allowed</span>
+                        <span>Round Type: Reminders Allowed</span>
                         <small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +10 Points</small>
-                        `;
+                    `;
                 } else {
                     launchForcedBtn.innerHTML = `
-                        <span>Reminders not allowed</span>
+                        <span>Round Type: Reminders not allowed</span>
                         <small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
                     `;
                 }
 
                 launchForcedBtn.onclick = () => {
-                    if (displaySurveyBar) {
-                        if (!sliderHasBeenInteractedWith) {
-                            let errorMsg = document.getElementById('survey-error-msg');
-                            if (errorMsg) errorMsg.style.display = 'block';
-                            return;
-                        }
-                        let sliderVal = document.getElementById('confidence-range-slider').value;
-                        confidenceSurveyCache[currentRound] = parseInt(sliderVal);
-                        if (surveyMarkup) surveyMarkup.remove();
-                    }
-                    maxCircleLimit = 25; 
-                    launchActiveMatchInstance(assignedType, 10);
+                    maxCircleLimit = 25;
+                    promptConfidenceSurvey(`Round ${currentRound}`, () => launchActiveMatchInstance(assignedType, 10));
                 };
                 modeSelectionBox.appendChild(launchForcedBtn);
             }
@@ -711,6 +706,7 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
             }
         }
 
+        // ================= CIRCLE SPAWNING SYSTEM (20% INNER BOUNDARY PADDING) =================
         function spawnInteractiveCircle(num) {
             if (num > maxCircleLimit) return;
 
@@ -721,15 +717,18 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
 
             let coordinatesFound = false;
             let percentX, percentY;
+            let attempts = 0;
 
-            while (!coordinatesFound) {
-                percentX = Math.random() * 78 + 2; 
-                percentY = Math.random() * 78 + 2;
+            while (!coordinatesFound && attempts < 200) {
+                attempts++;
+                percentX = Math.random() * 42 + 20; 
+                percentY = Math.random() * 42 + 20;
                 coordinatesFound = true;
 
                 for (let existingIndex in activeCirclesMap) {
                     let spatialDistance = Math.hypot(activeCirclesMap[existingIndex].x - percentX, activeCirclesMap[existingIndex].y - percentY);
-                    if (spatialDistance < 19) { 
+                    let minAllowedDistance = (attempts > 100) ? 14 : 18;
+                    if (spatialDistance < minAllowedDistance) { 
                         coordinatesFound = false;
                     }
                 }
@@ -895,17 +894,10 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
             let expectedCorrectZone = activeTargetMetric ? targetCirclesData[num].targetSide : 'bottom';
             let isCorrect = (finishedZone === expectedCorrectZone);
 
-            let calculatedPointsForCircle = 0;
+            // STRIKT GUARD: Only increment round counter when a SPECIAL target circle is matched correctly
             if (activeTargetMetric && isCorrect) {
                 roundCorrectPocketsCount++;
-                calculatedPointsForCircle = activeMatchPointsWeight;
-                if (!isTrialMode) totalCirclesPocketedInExperiment++;
-            }
-
-            if (!isTrialMode) {
-                totalScore += calculatedPointsForCircle; 
-            } else {
-                if (activeTargetMetric && isCorrect) {
+                if (isTrialMode) {
                     trialCorrectTargetsCount++;
                 }
             }
@@ -984,7 +976,7 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
                 };
             } else {
                 trialsCompletedSuccessfully = true;
-                progressBtn.innerHTML = "<span>Procedd to Main Experiment</span>";
+                progressBtn.innerHTML = "<span>Return to Home Gateway</span>";
                 progressBtn.onclick = () => {
                     displayInitialModeGateway();
                 };
@@ -995,51 +987,111 @@ You will have 17 upcoming trials, you’ll be given instructions before the star
         function evaluateMainMatchCompletion() {
 			let totalSpecialCirclesInRound = 10;
 			
-			// Calculate points and circles earned specifically in this round
+			// 1. Calculate points and circles earned in THIS ROUND ONLY
 			let roundScoreCalculated = roundCorrectPocketsCount * activeMatchPointsWeight;
 			let maxPossibleRoundScore = totalSpecialCirclesInRound * activeMatchPointsWeight;
 
-			// Increment running experiment totals
-			totalScore += roundScoreCalculated;
-			totalCirclesPocketedInExperiment += roundCorrectPocketsCount;
-
-			accuracyHistory.push({ round: currentRound, mode: currentSubGame, score: roundCorrectPocketsCount });
-
-			// Sync updated round performance and accumulators to Google Sheets
-			syncDataToSheets({
-				action: 'syncRound',
-				rowId: playerIdentity.rowId,
-				round: currentRound,
-				circlesPocketed: roundCorrectPocketsCount,
-				roundScoreEarned: roundScoreCalculated,
-				confidenceMetric: confidenceSurveyCache[currentRound] !== undefined ? confidenceSurveyCache[currentRound] : "Not Available",
-				totalCircles: totalCirclesPocketedInExperiment,
-				totalScore: totalScore
-			});
-
-			currentSubGame = ''; 
+			// Display Loading UI State
 			arenaElement.innerHTML = '';
 			overlayElement.style.display = 'flex';
 			modeSelectionBox.innerHTML = '';
-			
 			titleElement.innerText = `Round ${currentRound} Complete`;
-			
-			// Display per-round metrics and running accumulators
-			descElement.innerText = 
-				`You have completed Round ${currentRound}!\n\n` +
-				`Correctly Pocketed Circles: ${roundCorrectPocketsCount} / ${totalSpecialCirclesInRound}\n` +
-				`Scores Gained This Round: ${roundScoreCalculated} / ${maxPossibleRoundScore} points\n\n` +
-				`Total Accumulated Game Score: ${totalScore} points`;
-			
-			let nextRoundBtn = document.createElement('button');
-			nextRoundBtn.className = 'btn-choice-card';
-			nextRoundBtn.style.maxWidth = "100%";
-			nextRoundBtn.innerHTML = "<span>Proceed</span>";
-			nextRoundBtn.onclick = () => {
-				currentRound++;
-				startNewRoundLifecycle();
-			};
-			modeSelectionBox.appendChild(nextRoundBtn);
+			descElement.innerText = '';
+
+			// Create & Inject Animated Loading Spinner UI
+			let loadingContainer = document.createElement('div');
+			loadingContainer.style.display = 'flex';
+			loadingContainer.style.flexDirection = 'column';
+			loadingContainer.style.alignItems = 'center';
+			loadingContainer.style.justifyContent = 'center';
+			loadingContainer.style.margin = '20px 0';
+			loadingContainer.innerHTML = `
+				<div style="
+					border: 4px solid #f3f3f3;
+					border-top: 4px solid #4A90E2;
+					border-radius: 50%;
+					width: 42px;
+					height: 42px;
+					animation: spin 0.9s linear infinite;
+					margin-bottom: 12px;
+				"></div>
+				<span style="font-weight: bold; color: #4A90E2; font-size: 16px;">Updating Score. Please Wait...</span>
+				<style>
+					@keyframes spin {
+						0% { transform: rotate(0deg); }
+						100% { transform: rotate(360deg); }
+					}
+				</style>
+			`;
+			modeSelectionBox.appendChild(loadingContainer);
+
+			// 2. Fetch current accumulated totals directly from Google Sheets[cite: 3]
+			fetch(GOOGLE_SHEET_SCRIPT_URL, {
+				method: 'POST',
+				redirect: 'follow',
+				body: JSON.stringify({ action: 'register', name: playerIdentity.name, email: playerIdentity.email })
+			})
+			.then(res => res.json())
+			.then(serverData => {
+				// Clear Loading UI[cite: 3]
+				modeSelectionBox.innerHTML = '';
+
+				// Read baseline values directly from the sheet[cite: 3]
+				let currentSheetScore = parseInt(serverData.accumulatedScore) || 0;
+				let currentSheetCircles = parseInt(serverData.accumulatedCircles) || 0;
+
+				// Add current round results to the sheet baseline[cite: 3]
+				totalScore = currentSheetScore + roundScoreCalculated;
+				totalCirclesPocketedInExperiment = currentSheetCircles + roundCorrectPocketsCount;
+
+				accuracyHistory.push({ round: currentRound, mode: currentSubGame, score: roundCorrectPocketsCount });
+
+				// 3. Sync updated round performance and accumulated scores back to Google Sheets[cite: 3]
+				syncDataToSheets({
+					action: 'syncRound',
+					rowId: playerIdentity.rowId,
+					round: currentRound,
+					circlesPocketed: roundCorrectPocketsCount,
+					roundScoreEarned: roundScoreCalculated,
+					confidenceMetric: confidenceSurveyCache[currentRound] !== undefined ? confidenceSurveyCache[currentRound] : "Not Available",
+					totalCircles: totalCirclesPocketedInExperiment,
+					totalScore: totalScore
+				});
+
+				currentSubGame = ''; 
+				
+				// 4. Present updated round metrics and totals[cite: 3]
+				descElement.innerHTML = 
+					`<span>You have completed Round ${currentRound}!\n
+					Correctly Pocketed Circles: ${roundCorrectPocketsCount}/${totalSpecialCirclesInRound}
+					Scores Gained This Round: ${roundScoreCalculated}/${maxPossibleRoundScore} points\n\n
+					Total Accumulated Game Score: <b>${totalScore} points </b> </span>`;
+				
+				let nextRoundBtn = document.createElement('button');
+				nextRoundBtn.className = 'btn-choice-card';
+				nextRoundBtn.style.maxWidth = "100%";
+				nextRoundBtn.innerHTML = "<span>Proceed Next</span>";
+				nextRoundBtn.onclick = () => {
+					currentRound++;
+					startNewRoundLifecycle();
+				};
+				modeSelectionBox.appendChild(nextRoundBtn);
+			})
+			.catch(err => {
+				console.error("Error fetching baseline score from sheet:", err);
+				modeSelectionBox.innerHTML = '';
+				descElement.innerText = `You completed Round ${currentRound}!\nScores Gained: ${roundScoreCalculated} points.`;
+				
+				let nextRoundBtn = document.createElement('button');
+				nextRoundBtn.className = 'btn-choice-card';
+				nextRoundBtn.style.maxWidth = "100%";
+				nextRoundBtn.innerHTML = "<span>Proceed Next</span>";
+				nextRoundBtn.onclick = () => {
+					currentRound++;
+					startNewRoundLifecycle();
+				};
+				modeSelectionBox.appendChild(nextRoundBtn);
+			});
 		}
 		
         function syncDataToSheets(payload) {
