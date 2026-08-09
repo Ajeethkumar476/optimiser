@@ -46,10 +46,10 @@
             flex-wrap: wrap;
             justify-content: center;
             align-items: center;
-            flex-direction: row;
+            flex-direction: row; /* Arranges choice cards side-by-side */
         }
         .btn-choice-card {
-            padding: 20px 20px;
+            padding: 20px 30px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
@@ -438,7 +438,7 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
                     <span>100% (Certain)</span>
                 </div>
                 <div id="survey-error-msg" style="color: red; font-size: 14px; font-weight: bold; margin-top: 12px; display: none;">
-                    Please set your confidence level by interacting with the progress bar slider before starting the game.
+                    Please set your confidence level by interacting with the progress bar slider before starting the round.
                 </div>
             `;
             setTimeout(() => {
@@ -513,22 +513,22 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
                     titleElement.innerText = "Trial Stage 1 \nIn this experiment you will have a simple task to do";
                     descElement.innerText = "You will see several yellow circles inside a box. Inside each circle will be a number. You can move them around using your mouse. Your task is to drag them to the bottom of the box in sequence. Please start by dragging 1 all the way to the bottom. This will make it disappear. Then drag 2 to the bottom, then 3, and so on.";
                     maxCircleLimit = 8;
-                    runBtn.innerHTML = "<span>Start Trial Game</span>";
+                    runBtn.innerHTML = "<span>Start Trial Round</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
                     break;
                 case 2:
                     titleElement.innerText = "Trial Stage 2 \nNow with one special circle with 8 numbers";
                     descElement.innerText = "Now you will see 8 circles in the trial. You have to drag the circles to the bottom. \nAmong 8 circles there will be one special circle that will be a different color. \nThe colored circles have to be dragged to the side of the square that matches with the special circle.";
                     maxCircleLimit = 8;
-                    runBtn.innerHTML = "<span>Start Trial Game</span>";
+                    runBtn.innerHTML = "<span>Start Trial Round</span>";
                     runBtn.onclick = () => launchActiveMatchInstance('no-reminder', 10);
                     break;
                 case 3:
                     titleElement.innerText = "Trial Stage 3\nNow it will get more difficult.";
                     descElement.innerText = "There will be a total of 25 circles and 10 of them will be special ones that should go to one of the colored sides of the box. \nDon’t worry if you do not remember all of them. That’s fine - just try to remember as many as you can.";
                     maxCircleLimit = 25;
-                    runBtn.innerHTML = "<span>Start Trial Game</span>";
-                    runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
+                    runBtn.innerHTML = "<span>Start Trial Round</span>";
+                    runBtn.onclick = () => promptConfidenceSurvey('Trial Stage 3', () => launchActiveMatchInstance('reminder', 10));
                     break;
                 case 4:
                     titleElement.innerText = "Trial Stage 4 \nIn this trial, we are going to explain a strategy that can make the task easier";
@@ -541,8 +541,8 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
                     titleElement.innerText = "Trial Stage 5";
                     descElement.innerText = "Now there will be a total of 25 circles and 10 of them will be special circles that should go to intended colored sides of the box. You should use the reminder in this trial.";
                     maxCircleLimit = 25;
-                    runBtn.innerHTML = "<span>Start Trial Game</span>";
-                    runBtn.onclick = () => launchActiveMatchInstance('reminder', 10);
+                    runBtn.innerHTML = "<span>Start Trial Round</span>";
+                    runBtn.onclick = () => promptConfidenceSurvey('Trial Stage 5', () => launchActiveMatchInstance('reminder', 10));
                     break;
                 case 6:
                     titleElement.innerText = "Trial Stage 6";
@@ -585,7 +585,7 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
                 let reminderBtn = document.createElement('button');
                 reminderBtn.className = 'btn-choice-card';
                 reminderBtn.innerHTML = `
-                    <span>Game Style: Reminders Allowed</span>
+                    <span>Round Type: Reminders Allowed</span>
                     <small>You can set early spatial markers next to any edge except bottom.<br><br><strong>Correct Match:</strong> +${assignedReminderPoints} Points</small>
                 `;
                 reminderBtn.onclick = () => {
@@ -601,7 +601,7 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
                 let sequentialBtn = document.createElement('button');
                 sequentialBtn.className = 'btn-choice-card';
                 sequentialBtn.innerHTML = `
-                    <span>Game Style: Reminders not allowed</span>
+                    <span>Round Type: Reminders not allowed</span>
                     <small>Circles are completely locked until it is their numerical turn.<br><br><strong>Correct Match:</strong> +10 Points</small>
                 `;
                 sequentialBtn.onclick = () => {
@@ -894,7 +894,7 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
             let expectedCorrectZone = activeTargetMetric ? targetCirclesData[num].targetSide : 'bottom';
             let isCorrect = (finishedZone === expectedCorrectZone);
 
-            // STRIKT GUARD: Only increment round counter when a SPECIAL target circle is matched correctly
+            // STRICT GUARD: Only increment round counter when a SPECIAL target circle is matched correctly
             if (activeTargetMetric && isCorrect) {
                 roundCorrectPocketsCount++;
                 if (isTrialMode) {
@@ -1025,7 +1025,7 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
 			`;
 			modeSelectionBox.appendChild(loadingContainer);
 
-			// 2. Fetch current accumulated totals directly from Google Sheets[cite: 3]
+			// 2. Fetch current accumulated totals directly from Google Sheets
 			fetch(GOOGLE_SHEET_SCRIPT_URL, {
 				method: 'POST',
 				redirect: 'follow',
@@ -1033,20 +1033,20 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
 			})
 			.then(res => res.json())
 			.then(serverData => {
-				// Clear Loading UI[cite: 3]
+				// Clear Loading UI
 				modeSelectionBox.innerHTML = '';
 
-				// Read baseline values directly from the sheet[cite: 3]
+				// Read baseline values directly from the sheet
 				let currentSheetScore = parseInt(serverData.accumulatedScore) || 0;
 				let currentSheetCircles = parseInt(serverData.accumulatedCircles) || 0;
 
-				// Add current round results to the sheet baseline[cite: 3]
+				// Add current round results to the sheet baseline
 				totalScore = currentSheetScore + roundScoreCalculated;
 				totalCirclesPocketedInExperiment = currentSheetCircles + roundCorrectPocketsCount;
 
 				accuracyHistory.push({ round: currentRound, mode: currentSubGame, score: roundCorrectPocketsCount });
 
-				// 3. Sync updated round performance and accumulated scores back to Google Sheets[cite: 3]
+				// 3. Sync updated round performance and accumulated scores back to Google Sheets
 				syncDataToSheets({
 					action: 'syncRound',
 					rowId: playerIdentity.rowId,
@@ -1060,12 +1060,12 @@ You will have 17 upcoming rounds, you’ll be given instructions before the star
 
 				currentSubGame = ''; 
 				
-				// 4. Present updated round metrics and totals[cite: 3]
+				// 4. Present updated round metrics and totals
 				descElement.innerHTML = 
 					`<span>You have completed Round ${currentRound}!\n
 					Correctly Pocketed Circles: ${roundCorrectPocketsCount}/${totalSpecialCirclesInRound}
 					Scores Gained This Round: ${roundScoreCalculated}/${maxPossibleRoundScore} points\n\n
-					Total Accumulated Game Score: <b>${totalScore} points </b> </span>`;
+					Total Accumulated Experiment Score: <b>${totalScore} points </b> </span>`;
 				
 				let nextRoundBtn = document.createElement('button');
 				nextRoundBtn.className = 'btn-choice-card';
